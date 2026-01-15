@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Energy Clicker</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+    .animate-bounce { animation: bounce 1s ease-in-out; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function EnergyClicker() {
+      const defaultGenerators = [
+        { id: 1, name: 'Solar Panel', baseCost: 10, cost: 10, owned: 0, production: 1, visible: true, unlockRequirement: 0, milestones: [
+          { amount: 10, multiplier: 2 },
+          { amount: 25, multiplier: 2 },
+          { amount: 50, multiplier: 3 }
+        ]},
+        { id: 2, name: 'Wind Turbine', baseCost: 100, cost: 100, owned: 0, production: 5, visible: false, unlockRequirement: 5, milestones: [
+          { amount: 10, multiplier: 2 },
+          { amount: 25, multiplier: 2 },
+          { amount: 50, multiplier: 3 }
+        ]},
+        { id: 3, name: 'Power Plant', baseCost: 1000, cost: 1000, owned: 0, production: 25, visible: false, unlockRequirement: 5, milestones: [
+          { amount: 10, multiplier: 2 },
+          { amount: 25, multiplier: 2 },
+          { amount: 50, multiplier: 3 }
+        ]},
+        { id: 4, name: 'Fusion Reactor', baseCost: 10000, cost: 10000, owned: 0, production: 100, visible: false, unlockRequirement: 5, milestones: [
+          { amount: 10, multiplier: 2 },
+          { amount: 25, multiplier: 2 },
+          { amount: 50, multiplier: 4 }
+        ]},
+        { id: 5, name: 'Antimatter Generator', baseCost: 100000, cost: 100000, owned: 0, production: 500, visible: false, unlockRequirement: 5, milestones: [
+          { amount: 10, multiplier: 2 },
+          { amount: 25, multiplier: 3 },
+          { amount: 50, multiplier: 5 }
+        ]}
+      ];
+
+      const defaultUpgrades = [
+        { id: 1, name: 'Better Clicking', cost: 50, purchased: false, multiplier: 2, type: 'click', visible: true, requirement: { energy: 40 } },
+        { id: 2, name: 'Efficient Panels', cost: 500, purchased: false, multiplier: 2, type: 'production', visible: false, requirement: { generators: [{ id: 1, amount: 5 }] } },
+        { id: 3, name: 'Mega Click', cost: 5000, purchased: false, multiplier: 5, type: 'click', visible: false, requirement: { energy: 4000 } },
+        { id: 4, name: 'Turbine Boost', cost: 10000, purchased: false, multiplier: 2, type: 'production', visible: false, requirement: { generators: [{ id: 2, amount: 10 }] } },
+        { id: 5, name: 'Ultra Click', cost: 50000, purchased: false, multiplier: 10, type: 'click', visible: false, requirement: { energy: 40000 } }
+      ];
+
+      const defaultAchievements = [
+        { id: 1, name: 'First Click', desc: 'Klik 1 keer', requirement: 1, type: 'clicks', unlocked: false, reward: { type: 'clickMultiplier', value: 1.1 } },
+        { id: 2, name: 'Clicker', desc: 'Klik 100 keer', requirement: 100, type: 'clicks', unlocked: false, reward: { type: 'clickMultiplier', value: 1.25 } },
+        { id: 3, name: 'Click Master', desc: 'Klik 1000 keer', requirement: 1000, type: 'clicks', unlocked: false, reward: { type: 'clickMultiplier', value: 1.5 } },
+        { id: 4, name: 'Rich', desc: 'Verzamel 1000 energy', requirement: 1000, type: 'energy', unlocked: false, reward: { type: 'productionMultiplier', value: 1.1 } },
+        { id: 5, name: 'Tycoon', desc: 'Verzamel 10000 energy', requirement: 10000, type: 'energy', unlocked: false, reward: { type: 'productionMultiplier', value: 1.25 } },
+        { id: 6, name: 'Mogul', desc: 'Verzamel 100000 energy', requirement: 100000, type: 'energy', unlocked: false, reward: { type: 'productionMultiplier', value: 1.5 } }
+      ];
+
+      const loadGame = () => {
+        try {
+          const saved = localStorage.getItem('energyClickerSave');
+          if (saved) {
+            const data = JSON.parse(saved);
+            return data;
+          }
+        } catch (e) {
+          console.error('Error loading save:', e);
+        }
+        return null;
+      };
+
+      const savedData = loadGame();
+
+      const [energy, setEnergy] = useState(savedData?.energy || 0);
+      const [totalEnergy, setTotalEnergy] = useState(savedData?.totalEnergy || 0);
+      const [energyPerSecond, setEnergyPerSecond] = useState(0);
+      const [clickPower, setClickPower] = useState(savedData?.clickPower || 1);
+      const [prestigeLevel, setPrestigeLevel] = useState(savedData?.prestigeLevel || 0);
+      const [prestigeBonus, setPrestigeBonus] = useState(savedData?.prestigeBonus || 1);
+      const [lastSaveTime, setLastSaveTime] = useState(savedData?.lastSaveTime || Date.now());
+      
+      const [generators, setGenerators] = useState(savedData?.generators || defaultGenerators);
+      const [upgrades, setUpgrades] = useState(savedData?.upgrades || defaultUpgrades);
+      const [totalClicks, setTotalClicks] = useState(savedData?.totalClicks || 0);
+      const [achievements, setAchievements] = useState(savedData?.achievements || defaultAchievements);
+      const [showAchievement, setShowAchievement] = useState(null);
+      const [buyAmount, setBuyAmount] = useState(1);
+
+      // Calculate achievement bonuses safely
+      const achievementClickBonus = React.useMemo(() => {
+        if (!achievements || !Array.isArray(achievements)) return 1;
+        return achievements
+          .filter(a => a && a.unlocked && a.reward && a.reward.type === 'clickMultiplier')
+          .reduce((total, a) => total * a.reward.value, 1);
+      }, [achievements]);
+
+      const achievementProductionBonus = React.useMemo(() => {
+        if (!achievements || !Array.isArray(achievements)) return 1;
+        return achievements
+          .filter(a => a && a.unlocked && a.reward && a.reward.type === 'productionMultiplier')
+          .reduce((total, a) => total * a.reward.value, 1);
+      }, [achievements]);
+
+      // Offline progress
+      useEffect(() => {
+        if (savedData && energyPerSecond > 0 && lastSaveTime) {
+          const now = Date.now();
+          const timePassed = (now - lastSaveTime) / 1000;
+          const offlineGains = Math.floor(energyPerSecond * timePassed);
+          
+          if (offlineGains > 0 && timePassed > 60) {
+            setEnergy(prev => prev + offlineGains);
+            setTotalEnergy(prev => prev + offlineGains);
+            alert(`Welkom terug! Je hebt ${offlineGains} ⚡ verdiend terwijl je weg was (${Math.floor(timePassed / 60)} minuten)`);
+          }
+        }
+      }, []);
+
+      // Save game
+      useEffect(() => {
+        try {
+          const saveData = {
+            energy,
+            totalEnergy,
+            clickPower,
+            generators,
+            upgrades,
+            totalClicks,
+            achievements,
+            prestigeLevel,
+            prestigeBonus,
+            lastSaveTime: Date.now()
+          };
+          localStorage.setItem('energyClickerSave', JSON.stringify(saveData));
+        } catch (e) {
+          console.error('Error saving:', e);
+        }
+      }, [energy, totalEnergy, clickPower, generators, upgrades, totalClicks, achievements, prestigeLevel, prestigeBonus]);
+
+      // Idle production
+      useEffect(() => {
+        const interval = setInterval(() => {
+          if (energyPerSecond > 0) {
+            setEnergy(prev => prev + energyPerSecond);
+            setTotalEnergy(prev => prev + energyPerSecond);
+          }
+        }, 1000);
+        return () => clearInterval(interval);
+      }, [energyPerSecond]);
+
+      // Check achievements
+      useEffect(() => {
+        if (!achievements || !Array.isArray(achievements) || achievements.length === 0) return;
+        
+        achievements.forEach(ach => {
+          if (!ach || ach.unlocked) return;
+          
+          let achieved = false;
+          if (ach.type === 'clicks') {
+            achieved = totalClicks >= ach.requirement;
+          } else if (ach.type === 'energy') {
+            achieved = totalEnergy >= ach.requirement;
+          }
+          
+          if (achieved) {
+            setAchievements(prev => prev.map(a =>
+              a.id === ach.id ? { ...a, unlocked: true } : a
+            ));
+            setShowAchievement(ach);
+            setTimeout(() => setShowAchievement(null), 3000);
+            playSound('achievement');
+          }
+        });
+      }, [totalClicks, totalEnergy]);
+
+      // Calculate production
+      useEffect(() => {
+        if (!generators || !Array.isArray(generators)) return;
+        
+        const total = generators.reduce((sum, gen) => {
+          if (!gen || !gen.milestones) return sum;
+          
+          let production = gen.production || 0;
+          
+          gen.milestones.forEach(milestone => {
+            if (gen.owned >= milestone.amount) {
+              production *= milestone.multiplier;
+            }
+          });
+          
+          return sum + (gen.owned * production);
+        }, 0);
+        
+        setEnergyPerSecond(Math.floor(total * achievementProductionBonus * prestigeBonus));
+      }, [generators, achievementProductionBonus, prestigeBonus]);
+
+      // Check generator visibility
+      useEffect(() => {
+        if (!generators || !Array.isArray(generators)) return;
+        
+        setGenerators(prev => prev.map((gen, index) => {
+          if (!gen || gen.visible) return gen;
+          
+          if (index > 0) {
+            const prevGen = prev[index - 1];
+            if (prevGen && prevGen.owned >= (gen.unlockRequirement || 0)) {
+              return { ...gen, visible: true };
+            }
+          }
+          return gen;
+        }));
+      }, [generators]);
+
+      // Check upgrade visibility
+      useEffect(() => {
+        if (!upgrades || !Array.isArray(upgrades)) return;
+        
+        setUpgrades(prev => prev.map(upg => {
+          if (!upg || upg.visible) return upg;
+          
+          if (upg.requirement && upg.requirement.energy && totalEnergy >= upg.requirement.energy) {
+            return { ...upg, visible: true };
+          }
+          
+          if (upg.requirement && upg.requirement.generators && Array.isArray(upg.requirement.generators)) {
+            const meetsRequirement = upg.requirement.generators.every(req => {
+              const gen = generators.find(g => g && g.id === req.id);
+              return gen && gen.owned >= req.amount;
+            });
+            if (meetsRequirement) {
+              return { ...upg, visible: true };
+            }
+          }
+          
+          return upg;
+        }));
+      }, [totalEnergy, generators]);
+
+      const playSound = (type) => {
+        try {
+          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          if (type === 'click') {
+            oscillator.frequency.value = 800;
+            gainNode.gain.value = 0.1;
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.05);
+          } else if (type === 'buy') {
+            oscillator.frequency.value = 600;
+            gainNode.gain.value = 0.15;
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.1);
+          } else if (type === 'achievement') {
+            oscillator.frequency.value = 1000;
+            gainNode.gain.value = 0.2;
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.2);
+          }
+        } catch (e) {
+          console.log('Audio not supported');
+        }
+      };
+
+      const handleClick = () => {
+        const totalClickPower = Math.floor(clickPower * achievementClickBonus * prestigeBonus);
+        setEnergy(prev => prev + totalClickPower);
+        setTotalEnergy(prev => prev + totalClickPower);
+        setTotalClicks(prev => prev + 1);
+        playSound('click');
+      };
+
+      const calculateCost = (gen, amount) => {
+        if (!gen || !gen.cost || !gen.owned) return 0;
+        let total = 0;
+        for (let i = 0; i < amount; i++) {
+          total += Math.floor(gen.cost * Math.pow(1.15, gen.owned + i));
+        }
+        return total;
+      };
+
+      const getMaxAffordable = (gen) => {
+        if (!gen) return 0;
+        let amount = 0;
+        let totalCost = 0;
+        while (totalCost + Math.floor(gen.cost * Math.pow(1.15, gen.owned + amount)) <= energy) {
+          totalCost += Math.floor(gen.cost * Math.pow(1.15, gen.owned + amount));
+          amount++;
+          if (amount > 1000) break;
+        }
+        return amount;
+      };
+
+      const buyGenerator = (gen) => {
+        if (!gen) return;
+        const amount = buyAmount === 'max' ? getMaxAffordable(gen) : buyAmount;
+        const cost = calculateCost(gen, amount);
+        
+        if (energy >= cost && amount > 0) {
+          setEnergy(prev => prev - cost);
+          setGenerators(prev => prev.map(g => 
+            g.id === gen.id 
+              ? { ...g, owned: g.owned + amount, cost: Math.floor(g.cost * Math.pow(1.15, amount)) }
+              : g
+          ));
+          playSound('buy');
+        }
+      };
+
+      const buyUpgrade = (upgrade) => {
+        if (!upgrade || upgrade.purchased) return;
+        if (energy >= upgrade.cost) {
+          setEnergy(prev => prev - upgrade.cost);
+          setUpgrades(prev => prev.map(u =>
+            u.id === upgrade.id ? { ...u, purchased: true } : u
+          ));
+          
+          if (upgrade.type === 'click') {
+            setClickPower(prev => prev * upgrade.multiplier);
+          } else if (upgrade.type === 'production') {
+            setGenerators(prev => prev.map(g =>
+              g.id === 1 ? { ...g, production: g.production * upgrade.multiplier } : g
+            ));
+          }
+          playSound('buy');
+        }
+      };
+
+      const canPrestige = totalEnergy >= 1000000;
+      
+      const doPrestige = () => {
+        if (!canPrestige) return;
+        
+        if (confirm(`Prestige reset alles, maar geeft je +50% permanent productie bonus!\n\nHuidige bonus: ${((prestigeBonus - 1) * 100).toFixed(0)}%\nNieuwe bonus: ${((prestigeBonus * 1.5 - 1) * 100).toFixed(0)}%\n\nDoorgaan?`)) {
+          setPrestigeLevel(prev => prev + 1);
+          setPrestigeBonus(prev => prev * 1.5);
+          
+          setEnergy(0);
+          setTotalEnergy(0);
+          setClickPower(1);
+          setTotalClicks(0);
+          setEnergyPerSecond(0);
+          
+          setGenerators(defaultGenerators);
+          setUpgrades(defaultUpgrades);
+          setAchievements(defaultAchievements);
+        }
+      };
+
+      const resetGame = () => {
+        if (confirm('Weet je zeker dat je ALLES wilt resetten? (inclusief prestige)')) {
+          localStorage.removeItem('energyClickerSave');
+          window.location.reload();
+        }
+      };
+
+      const getMilestoneProgress = (gen) => {
+        if (!gen || !gen.milestones) return null;
+        const nextMilestone = gen.milestones.find(m => gen.owned < m.amount);
+        if (!nextMilestone) return null;
+        return { next: nextMilestone.amount, current: gen.owned };
+      };
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 text-white p-4">
+          {showAchievement && (
+            <div className="fixed top-4 right-4 bg-gradient-to-r from-yellow-400 to-orange-500 text-black px-6 py-4 rounded-lg shadow-2xl animate-bounce z-50">
+              <div className="font-bold text-lg">🏆 Achievement Unlocked!</div>
+              <div className="text-sm">{showAchievement.name}</div>
+              {showAchievement.reward && (
+                <div className="text-xs mt-1">
+                  Reward: {showAchievement.reward.type === 'clickMultiplier' ? 
+                    `+${((showAchievement.reward.value - 1) * 100).toFixed(0)}% click power` :
+                    `+${((showAchievement.reward.value - 1) * 100).toFixed(0)}% production`
+                  }
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="max-w-6xl mx-auto">
+            <h1 className="text-4xl font-bold text-center mb-2 flex items-center justify-center gap-2">
+              ⚡ Energy Clicker
+            </h1>
+            {prestigeLevel > 0 && (
+              <p className="text-center text-yellow-300 mb-2">
+                ⭐ Prestige Level {prestigeLevel} | +{((prestigeBonus - 1) * 100).toFixed(0)}% bonus
+              </p>
+            )}
+            <p className="text-center text-blue-200 mb-6">Klik om energie te verzamelen!</p>
+
+            <div className="bg-white/10 backdrop-blur rounded-lg p-6 mb-6">
+              <div className="text-center">
+                <div className="text-5xl font-bold text-yellow-400 mb-2">
+                  {Math.floor(energy).toLocaleString()} ⚡
+                </div>
+                <div className="text-xl text-blue-200">
+                  {energyPerSecond > 0 && `+${energyPerSecond.toLocaleString()} per seconde`}
+                </div>
+                <div className="text-sm text-gray-300 mt-2">
+                  Click power: {Math.floor(clickPower * achievementClickBonus * prestigeBonus).toLocaleString()} | 
+                  Total clicks: {totalClicks.toLocaleString()} | 
+                  Total energy: {Math.floor(totalEnergy).toLocaleString()}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-center mb-8">
+              <button
+                onClick={handleClick}
+                className="w-48 h-48 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full shadow-2xl transform transition hover:scale-105 active:scale-95 flex items-center justify-center text-6xl font-bold cursor-pointer"
+              >
+                ⚡
+              </button>
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-6">
+              <div className="bg-white/10 backdrop-blur rounded-lg p-6 md:col-span-2">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-2xl font-bold">📈 Generators</h2>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setBuyAmount(1)}
+                      className={`px-3 py-1 rounded font-bold text-sm cursor-pointer ${buyAmount === 1 ? 'bg-blue-500' : 'bg-gray-700'}`}
+                    >
+                      x1
+                    </button>
+                    <button
+                      onClick={() => setBuyAmount(10)}
+                      className={`px-3 py-1 rounded font-bold text-sm cursor-pointer ${buyAmount === 10 ? 'bg-blue-500' : 'bg-gray-700'}`}
+                    >
+                      x10
+                    </button>
+                    <button
+                      onClick={() => setBuyAmount('max')}
+                      className={`px-3 py-1 rounded font-bold text-sm cursor-pointer ${buyAmount === 'max' ? 'bg-blue-500' : 'bg-gray-700'}`}
+                    >
+                      MAX
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {generators && generators.filter(g => g && g.visible).map(gen => {
+                    const milestone = getMilestoneProgress(gen);
+                    const amount = buyAmount === 'max' ? getMaxAffordable(gen) : buyAmount;
+                    const cost = calculateCost(gen, amount);
+                    
+                    return (
+                      <div key={gen.id} className="bg-black/20 rounded-lg p-4">
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="flex-1">
+                            <div className="font-bold">{gen.name}</div>
+                            <div className="text-sm text-gray-300">
+                              +{gen.production}/sec | Owned: {gen.owned}
+                            </div>
+                            {milestone && (
+                              <div className="text-xs text-yellow-300 mt-1">
+                                Next milestone: {milestone.current}/{milestone.next}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => buyGenerator(gen)}
+                            disabled={energy < cost || amount === 0}
+                            className={`px-4 py-2 rounded font-bold transition cursor-pointer ${
+                              energy >= cost && amount > 0
+                                ? 'bg-green-500 hover:bg-green-600'
+                                : 'bg-gray-600 cursor-not-allowed opacity-50'
+                            }`}
+                          >
+                            {amount > 1 ? `${amount}x ` : ''}{cost.toLocaleString()} ⚡
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div className="bg-white/10 backdrop-blur rounded-lg p-6">
+                  <h2 className="text-2xl font-bold mb-4">⭐ Upgrades</h2>
+                  <div className="space-y-3">
+                    {upgrades && upgrades.filter(u => u && u.visible).map(upgrade => (
+                      <div key={upgrade.id} className="bg-black/20 rounded-lg p-4">
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <div className="font-bold">{upgrade.name}</div>
+                            <div className="text-sm text-gray-300">
+                              {upgrade.purchased ? '✓ Gekocht!' : `${upgrade.multiplier}x ${upgrade.type === 'click' ? 'clicks' : 'production'}`}
+                            </div>
+                          </div>
+                          {!upgrade.purchased && (
+                            <button
+                              onClick={() => buyUpgrade(upgrade)}
+                              disabled={energy < upgrade.cost}
+                              className={`px-4 py-2 rounded font-bold transition cursor-pointer ${
+                                energy >= upgrade.cost
+                                  ? 'bg-purple-500 hover:bg-purple-600'
+                                  : 'bg-gray-600 cursor-not-allowed opacity-50'
+                              }`}
+                            >
+                              {upgrade.cost.toLocaleString()} ⚡
+                            </button>
+                          )}
+                          {upgrade.purchased && (
+                            <div className="text-green-400 font-bold">✓</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-white/10 backdrop-blur rounded-lg p-6">
+                  <h2 className="text-2xl font-bold mb-4">🏆 Achievements</h2>
+                  <div className="space-y-2">
+                    {achievements && achievements.map(ach => (
+                      <div 
+                        key={ach.id} 
+                        className={`p-3 rounded ${ach.unlocked ? 'bg-yellow-500/30' : 'bg-black/20'}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">{ach.unlocked ? '🏆' : '🔒'}</span>
+                          <div className="flex-1">
+                            <div className="font-bold text-sm">{ach.name}</div>
+                            <div className="text-xs text-gray-300">{ach.desc}</div>
+                            {ach.unlocked && ach.reward && (
+                              <div className="text-xs text-yellow-300 mt-1">
+                                +{((ach.reward.value - 1) * 100).toFixed(0)}% {ach.reward.type === 'clickMultiplier' ? 'clicks' : 'production'}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {canPrestige && (
+                  <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg p-6">
+                    <h2 className="text-2xl font-bold mb-2">🏆 Prestige Available!</h2>
+                    <p className="text-sm mb-4">
+                      Reset alles voor +50% permanent productie bonus!
+                    </p>
+                    <button
+                      onClick={doPrestige}
+                      className="w-full px-4 py-3 bg-yellow-400 hover:bg-yellow-500 text-black rounded font-bold transition cursor-pointer"
+                    >
+                      PRESTIGE NOW
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 bg-blue-500/20 rounded-lg p-4 text-sm">
+              <strong>💡 Tips:</strong> Milestone bonussen bij 10/25/50! Koop meerdere generators tegelijk met x10 of MAX. Prestige bij 1M total energy!
+              <button 
+                onClick={resetGame}
+                className="ml-4 px-3 py-1 bg-red-500 hover:bg-red-600 rounded text-xs font-bold cursor-pointer"
+              >
+                Reset Game
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.render(<EnergyClicker />, document.getElementById('root'));
+  </script>
+</body>
+</html>
