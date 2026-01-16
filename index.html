@@ -405,7 +405,12 @@
         }
       };
 
-      const canPrestige = totalEnergy >= 1000000;
+      const getPrestigeCost = () => {
+        // Cost increases: 1M, 2.5M, 5M, 10M, 20M, etc.
+        return 1000000 * Math.pow(2, prestigeLevel);
+      };
+      
+      const canPrestige = totalEnergy >= getPrestigeCost();
       
       const calculatePrestigePoints = () => {
         // Formula: sqrt(totalEnergy / 1000000) rounded down
@@ -655,6 +660,8 @@
                     <h2 className="text-2xl font-bold mb-2">🏆 Prestige Available!</h2>
                     <p className="text-sm mb-4">
                       Reset alles voor +50% permanent bonus én {calculatePrestigePoints()} Prestige Points!
+                      <br/>
+                      <span className="text-xs">Volgende prestige kost: {(getPrestigeCost() * 2).toLocaleString()} total energy</span>
                     </p>
                     <button
                       onClick={doPrestige}
