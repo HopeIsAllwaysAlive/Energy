@@ -287,10 +287,10 @@
       };
 
       const calculateCost = (gen, amount) => {
-        if (!gen || !gen.cost || !gen.owned) return 0;
+        if (!gen || !gen.baseCost || typeof gen.owned !== 'number') return 0;
         let total = 0;
         for (let i = 0; i < amount; i++) {
-          total += Math.floor(gen.cost * Math.pow(1.15, gen.owned + i));
+          total += Math.floor(gen.baseCost * Math.pow(1.15, gen.owned + i));
         }
         return total;
       };
@@ -299,8 +299,8 @@
         if (!gen) return 0;
         let amount = 0;
         let totalCost = 0;
-        while (totalCost + Math.floor(gen.cost * Math.pow(1.15, gen.owned + amount)) <= energy) {
-          totalCost += Math.floor(gen.cost * Math.pow(1.15, gen.owned + amount));
+        while (totalCost + Math.floor(gen.baseCost * Math.pow(1.15, gen.owned + amount)) <= energy) {
+          totalCost += Math.floor(gen.baseCost * Math.pow(1.15, gen.owned + amount));
           amount++;
           if (amount > 1000) break;
         }
@@ -309,18 +309,34 @@
 
       const buyGenerator = (gen) => {
         if (!gen) return;
-        const amount = buyAmount === 'max' ? getMaxAffordable(gen) : buyAmount;
+        
+        let amount;
+        if (buyAmount === 'max') {
+          amount = getMaxAffordable(gen);
+        } else if (buyAmount === 'milestone') {
+          amount = getToNextMilestone(gen);
+        } else {
+          amount = buyAmount;
+        }
+        
         const cost = calculateCost(gen, amount);
         
         if (energy >= cost && amount > 0) {
           setEnergy(prev => prev - cost);
           setGenerators(prev => prev.map(g => 
             g.id === gen.id 
-              ? { ...g, owned: g.owned + amount, cost: Math.floor(g.cost * Math.pow(1.15, amount)) }
+              ? { ...g, owned: g.owned + amount, cost: Math.floor(g.baseCost * Math.pow(1.15, g.owned + amount)) }
               : g
           ));
           playSound('buy');
         }
+      };
+
+      const getToNextMilestone = (gen) => {
+        if (!gen || !gen.milestones) return 0;
+        const nextMilestone = gen.milestones.find(m => gen.owned < m.amount);
+        if (!nextMilestone) return 0;
+        return nextMilestone.amount - gen.owned;
       };
 
       const buyUpgrade = (upgrade) => {
@@ -377,6 +393,20 @@
         return { next: nextMilestone.amount, current: gen.owned };
       };
 
+      const getActualProduction = (gen) => {
+        if (!gen || !gen.milestones) return gen.production || 0;
+        
+        let production = gen.production || 0;
+        
+        gen.milestones.forEach(milestone => {
+          if (gen.owned >= milestone.amount) {
+            production *= milestone.multiplier;
+          }
+        });
+        
+        return production;
+      };
+
       return (
         <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 text-white p-4">
           {showAchievement && (
@@ -411,12 +441,16 @@
                   {Math.floor(energy).toLocaleString()} ⚡
                 </div>
                 <div className="text-xl text-blue-200">
-                  {energyPerSecond > 0 && `+${energyPerSecond.toLocaleString()} per seconde`}
+                  {energyPerSecond > 0 && `+${energyPerSecond.toLocaleString()}/sec`}
                 </div>
                 <div className="text-sm text-gray-300 mt-2">
                   Click power: {Math.floor(clickPower * achievementClickBonus * prestigeBonus).toLocaleString()} | 
-                  Total clicks: {totalClicks.toLocaleString()} | 
-                  Total energy: {Math.floor(totalEnergy).toLocaleString()}
+                  Total clicks: {totalClicks.toLocaleString()}
+                </div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Total earned: {Math.floor(totalEnergy).toLocaleString()} | 
+                  Achievement bonus: {((achievementProductionBonus - 1) * 100).toFixed(0)}% prod, {((achievementClickBonus - 1) * 100).toFixed(0)}% click
+                  {prestigeLevel > 0 && ` | Prestige: +${((prestigeBonus - 1) * 100).toFixed(0)}%`}
                 </div>
               </div>
             </div>
@@ -453,13 +487,28 @@
                     >
                       MAX
                     </button>
+                    <button
+                      onClick={() => setBuyAmount('milestone')}
+                      className={`px-3 py-1 rounded font-bold text-sm cursor-pointer ${buyAmount === 'milestone' ? 'bg-blue-500' : 'bg-gray-700'}`}
+                    >
+                      ➜MS
+                    </button>
                   </div>
                 </div>
                 <div className="space-y-3">
                   {generators && generators.filter(g => g && g.visible).map(gen => {
                     const milestone = getMilestoneProgress(gen);
-                    const amount = buyAmount === 'max' ? getMaxAffordable(gen) : buyAmount;
+                    let amount;
+                    if (buyAmount === 'max') {
+                      amount = getMaxAffordable(gen);
+                    } else if (buyAmount === 'milestone') {
+                      amount = getToNextMilestone(gen);
+                    } else {
+                      amount = buyAmount;
+                    }
                     const cost = calculateCost(gen, amount);
+                    const actualProduction = getActualProduction(gen);
+                    const totalProduction = actualProduction * gen.owned * achievementProductionBonus * prestigeBonus;
                     
                     return (
                       <div key={gen.id} className="bg-black/20 rounded-lg p-4">
@@ -467,11 +516,14 @@
                           <div className="flex-1">
                             <div className="font-bold">{gen.name}</div>
                             <div className="text-sm text-gray-300">
-                              +{gen.production}/sec | Owned: {gen.owned}
+                              Base: {gen.production}/sec | With bonuses: {actualProduction.toFixed(1)}/sec
+                            </div>
+                            <div className="text-sm text-blue-300">
+                              Owned: {gen.owned} | Total: {totalProduction.toFixed(1)}/sec
                             </div>
                             {milestone && (
                               <div className="text-xs text-yellow-300 mt-1">
-                                Next milestone: {milestone.current}/{milestone.next}
+                                Next milestone: {milestone.current}/{milestone.next} (+{gen.milestones.find(m => m.amount === milestone.next).multiplier}x)
                               </div>
                             )}
                           </div>
