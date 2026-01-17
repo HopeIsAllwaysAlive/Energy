@@ -65,7 +65,9 @@
         { id: 3, name: 'Click Master', desc: 'Klik 1000 keer', requirement: 1000, type: 'clicks', unlocked: false, reward: { type: 'clickMultiplier', value: 1.5 } },
         { id: 4, name: 'Rich', desc: 'Verzamel 1000 energy', requirement: 1000, type: 'energy', unlocked: false, reward: { type: 'productionMultiplier', value: 1.1 } },
         { id: 5, name: 'Tycoon', desc: 'Verzamel 10000 energy', requirement: 10000, type: 'energy', unlocked: false, reward: { type: 'productionMultiplier', value: 1.25 } },
-        { id: 6, name: 'Mogul', desc: 'Verzamel 100000 energy', requirement: 100000, type: 'energy', unlocked: false, reward: { type: 'productionMultiplier', value: 1.5 } }
+        { id: 6, name: 'Mogul', desc: 'Verzamel 100000 energy', requirement: 100000, type: 'energy', unlocked: false, reward: { type: 'productionMultiplier', value: 1.5 } },
+        { id: 7, name: 'Automation Expert', desc: 'Klik 5000 keer', requirement: 5000, type: 'clicks', unlocked: false, reward: { type: 'unlockAutobuyers', value: 'generators' } },
+        { id: 8, name: 'Efficiency Master', desc: 'Verzamel 1M energy', requirement: 1000000, type: 'energy', unlocked: false, reward: { type: 'unlockAutobuyers', value: 'upgrades' } }
       ];
 
       const loadGame = () => {
@@ -94,11 +96,20 @@
       const [generators, setGenerators] = useState(savedData?.generators || defaultGenerators);
       const [upgrades, setUpgrades] = useState(savedData?.upgrades || defaultUpgrades);
       const [totalClicks, setTotalClicks] = useState(savedData?.totalClicks || 0);
+      const [lifetimeClicks, setLifetimeClicks] = useState(savedData?.lifetimeClicks || 0);
       const [achievements, setAchievements] = useState(savedData?.achievements || defaultAchievements);
       const [showAchievement, setShowAchievement] = useState(null);
       const [buyAmount, setBuyAmount] = useState(1);
       const [activeTab, setActiveTab] = useState('main');
       const [prestigePoints, setPrestigePoints] = useState(savedData?.prestigePoints || 0);
+      const [autoBuyersEnabled, setAutoBuyersEnabled] = useState(savedData?.autoBuyersEnabled || {
+        generators: false,
+        upgrades: false
+      });
+      const [autoBuyersUnlocked, setAutoBuyersUnlocked] = useState(savedData?.autoBuyersUnlocked || {
+        generators: false,
+        upgrades: false
+      });
       const [prestigeUpgrades, setPrestigeUpgrades] = useState(savedData?.prestigeUpgrades || [
         { id: 1, name: 'Click Boost I', cost: 1, purchased: false, effect: { type: 'clickMultiplier', value: 2 } },
         { id: 2, name: 'Production Boost I', cost: 1, purchased: false, effect: { type: 'productionMultiplier', value: 2 } },
@@ -177,18 +188,21 @@
             generators,
             upgrades,
             totalClicks,
+            lifetimeClicks,
             achievements,
             prestigeLevel,
             prestigeBonus,
             prestigePoints,
             prestigeUpgrades,
+            autoBuyersEnabled,
+            autoBuyersUnlocked,
             lastSaveTime: Date.now()
           };
           localStorage.setItem('energyClickerSave', JSON.stringify(saveData));
         } catch (e) {
           console.error('Error saving:', e);
         }
-      }, [energy, totalEnergy, clickPower, generators, upgrades, totalClicks, achievements, prestigeLevel, prestigeBonus, prestigePoints, prestigeUpgrades]);
+      }, [energy, totalEnergy, clickPower, generators, upgrades, totalClicks, lifetimeClicks, achievements, prestigeLevel, prestigeBonus, prestigePoints, prestigeUpgrades, autoBuyersEnabled, autoBuyersUnlocked]);
 
       // Idle production
       useEffect(() => {
@@ -202,6 +216,8 @@
             const totalClickPower = Math.floor(clickPower * achievementClickBonus * prestigeBonus * prestigeClickBonus);
             setEnergy(prev => prev + totalClickPower * autoClickRate);
             setTotalEnergy(prev => prev + totalClickPower * autoClickRate);
+            setTotalClicks(prev => prev + autoClickRate);
+            setLifetimeClicks(prev => prev + autoClickRate);
           }
         }, 1000);
         return () => clearInterval(interval);
@@ -216,7 +232,7 @@
           
           let achieved = false;
           if (ach.type === 'clicks') {
-            achieved = totalClicks >= ach.requirement;
+            achieved = lifetimeClicks >= ach.requirement;
           } else if (ach.type === 'energy') {
             achieved = totalEnergy >= ach.requirement;
           }
@@ -228,9 +244,17 @@
             setShowAchievement(ach);
             setTimeout(() => setShowAchievement(null), 3000);
             playSound('achievement');
+            
+            // Unlock autobuyers
+            if (ach.reward.type === 'unlockAutobuyers') {
+              setAutoBuyersUnlocked(prev => ({
+                ...prev,
+                [ach.reward.value]: true
+              }));
+            }
           }
         });
-      }, [totalClicks, totalEnergy]);
+      }, [lifetimeClicks, totalEnergy]);
 
       // Calculate production
       useEffect(() => {
@@ -270,7 +294,35 @@
         }));
       }, [generators]);
 
-      // Check upgrade visibility
+      // Autobuyers
+      useEffect(() => {
+        if (!autoBuyersEnabled.generators && !autoBuyersEnabled.upgrades) return;
+        
+        const interval = setInterval(() => {
+          // Auto-buy generators
+          if (autoBuyersEnabled.generators && generators) {
+            generators.forEach(gen => {
+              if (gen.visible) {
+                const cost = calculateCost(gen, 1);
+                if (energy >= cost) {
+                  buyGenerator(gen);
+                }
+              }
+            });
+          }
+          
+          // Auto-buy upgrades
+          if (autoBuyersEnabled.upgrades && upgrades) {
+            upgrades.forEach(upg => {
+              if (upg.visible && !upg.purchased && energy >= upg.cost) {
+                buyUpgrade(upg);
+              }
+            });
+          }
+        }, 100); // Check every 100ms
+        
+        return () => clearInterval(interval);
+      }, [autoBuyersEnabled, generators, upgrades, energy]);
       useEffect(() => {
         if (!upgrades || !Array.isArray(upgrades)) return;
         
@@ -330,6 +382,7 @@
         setEnergy(prev => prev + totalClickPower);
         setTotalEnergy(prev => prev + totalClickPower);
         setTotalClicks(prev => prev + 1);
+        setLifetimeClicks(prev => prev + 1);
         playSound('click');
       };
 
@@ -422,7 +475,7 @@
         
         const pointsGained = calculatePrestigePoints();
         
-        if (confirm(`Prestige reset alles, maar geeft je:\n• +50% permanent productie bonus\n• ${pointsGained} Prestige Points\n\nHuidige bonus: ${((prestigeBonus - 1) * 100).toFixed(0)}%\nNieuwe bonus: ${((prestigeBonus * 1.5 - 1) * 100).toFixed(0)}%\n\nDoorgaan?`)) {
+        if (confirm(`Prestige reset alles, maar geeft je:\n• +50% permanent productie bonus\n• ${pointsGained} Prestige Points\n\nHuidige bonus: ${((prestigeBonus - 1) * 100).toFixed(0)}%\nNieuwe bonus: ${((prestigeBonus * 1.5 - 1) * 100).toFixed(0)}%\n\nAchievements blijven behouden!\n\nDoorgaan?`)) {
           setPrestigeLevel(prev => prev + 1);
           setPrestigeBonus(prev => prev * 1.5);
           setPrestigePoints(prev => prev + pointsGained);
@@ -435,7 +488,7 @@
           
           setGenerators(defaultGenerators);
           setUpgrades(defaultUpgrades);
-          setAchievements(defaultAchievements);
+          // DON'T reset achievements anymore!
           
           // Unlock prestige tab after first prestige
           if (prestigeLevel === 0) {
@@ -445,9 +498,17 @@
       };
 
       const resetGame = () => {
-        if (confirm('Weet je zeker dat je ALLES wilt resetten? (inclusief prestige)')) {
-          localStorage.removeItem('energyClickerSave');
-          window.location.reload();
+        if (confirm('Weet je zeker dat je ALLES wilt resetten? (inclusief prestige)\n\nDit kan NIET ongedaan worden gemaakt!')) {
+          try {
+            localStorage.removeItem('energyClickerSave');
+            // Force complete reset by reloading
+            setTimeout(() => {
+              window.location.reload();
+            }, 100);
+          } catch (e) {
+            console.error('Reset failed:', e);
+            alert('Reset mislukt. Probeer de pagina handmatig te verversen.');
+          }
         }
       };
 
@@ -511,30 +572,62 @@
             )}
             <p className="text-center text-blue-200 mb-6">Klik om energie te verzamelen!</p>
 
+            <div className="bg-white/10 backdrop-blur rounded-lg p-6 mb-6">
+              <div className="text-center">
+                <div className="text-5xl font-bold text-yellow-400 mb-2">
+                  {Math.floor(energy).toLocaleString()} ⚡
+                </div>
+                <div className="text-xl text-blue-200">
+                  {energyPerSecond > 0 && `+${energyPerSecond.toLocaleString()}/sec`}
+                </div>
+                <div className="text-sm text-gray-300 mt-2">
+                  Click power: {Math.floor(clickPower * achievementClickBonus * prestigeBonus * prestigeClickBonus).toLocaleString()} | 
+                  Total clicks: {totalClicks.toLocaleString()}
+                  {autoClickRate > 0 && ` | 🤖 Auto: ${autoClickRate}/sec`}
+                </div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Total earned: {Math.floor(totalEnergy).toLocaleString()} | 
+                  Lifetime clicks: {lifetimeClicks.toLocaleString()} |
+                  Achievement bonus: {((achievementProductionBonus - 1) * 100).toFixed(0)}% prod, {((achievementClickBonus - 1) * 100).toFixed(0)}% click
+                  {prestigeLevel > 0 && ` | Prestige: +${((prestigeBonus - 1) * 100).toFixed(0)}%`}
+                  {(prestigeClickBonus > 1 || prestigeProductionBonus > 1) && ` | PP Bonus: ${((prestigeClickBonus - 1) * 100).toFixed(0)}% click, ${((prestigeProductionBonus - 1) * 100).toFixed(0)}% prod`}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-center mb-6">
+              <button
+                onClick={handleClick}
+                className="w-48 h-48 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full shadow-2xl transform transition hover:scale-105 active:scale-95 flex items-center justify-center text-6xl font-bold cursor-pointer"
+              >
+                ⚡
+              </button>
+            </div>
+
             {/* Tab Navigation */}
-            <div className="flex justify-center gap-2 mb-6">
+            <div className="flex flex-wrap justify-center gap-2 mb-6">
               <button
                 onClick={() => setActiveTab('main')}
-                className={`px-6 py-2 rounded-lg font-bold transition ${activeTab === 'main' ? 'bg-blue-500' : 'bg-gray-700 hover:bg-gray-600'}`}
+                className={`px-4 py-2 rounded-lg font-bold transition text-sm sm:text-base ${activeTab === 'main' ? 'bg-blue-500' : 'bg-gray-700 hover:bg-gray-600'}`}
               >
                 ⚡ Main
               </button>
               <button
                 onClick={() => setActiveTab('upgrades')}
-                className={`px-6 py-2 rounded-lg font-bold transition ${activeTab === 'upgrades' ? 'bg-purple-500' : 'bg-gray-700 hover:bg-gray-600'}`}
+                className={`px-4 py-2 rounded-lg font-bold transition text-sm sm:text-base ${activeTab === 'upgrades' ? 'bg-purple-500' : 'bg-gray-700 hover:bg-gray-600'}`}
               >
                 ⭐ Upgrades
               </button>
               <button
                 onClick={() => setActiveTab('achievements')}
-                className={`px-6 py-2 rounded-lg font-bold transition ${activeTab === 'achievements' ? 'bg-yellow-500' : 'bg-gray-700 hover:bg-gray-600'}`}
+                className={`px-4 py-2 rounded-lg font-bold transition text-sm sm:text-base ${activeTab === 'achievements' ? 'bg-yellow-500' : 'bg-gray-700 hover:bg-gray-600'}`}
               >
                 🏆 Achievements
               </button>
               {prestigeLevel > 0 && (
                 <button
                   onClick={() => setActiveTab('prestige')}
-                  className={`px-6 py-2 rounded-lg font-bold transition ${activeTab === 'prestige' ? 'bg-pink-500' : 'bg-gray-700 hover:bg-gray-600'}`}
+                  className={`px-4 py-2 rounded-lg font-bold transition text-sm sm:text-base ${activeTab === 'prestige' ? 'bg-pink-500' : 'bg-gray-700 hover:bg-gray-600'}`}
                 >
                   💎 Prestige
                 </button>
@@ -566,14 +659,30 @@
             {/* MAIN TAB */}
             {activeTab === 'main' && (
               <>
-                <div className="flex justify-center mb-8">
-                  <button
-                    onClick={handleClick}
-                    className="w-48 h-48 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full shadow-2xl transform transition hover:scale-105 active:scale-95 flex items-center justify-center text-6xl font-bold cursor-pointer"
-                  >
-                    ⚡
-                  </button>
-                </div>
+                {/* Autobuyers Toggle */}
+                {(autoBuyersUnlocked.generators || autoBuyersUnlocked.upgrades) && (
+                  <div className="bg-green-500/20 rounded-lg p-4 mb-6">
+                    <h3 className="font-bold mb-2">🤖 Autobuyers</h3>
+                    <div className="flex flex-wrap gap-3">
+                      {autoBuyersUnlocked.generators && (
+                        <button
+                          onClick={() => setAutoBuyersEnabled(prev => ({ ...prev, generators: !prev.generators }))}
+                          className={`px-4 py-2 rounded font-bold transition ${autoBuyersEnabled.generators ? 'bg-green-500' : 'bg-gray-700'}`}
+                        >
+                          Generators: {autoBuyersEnabled.generators ? 'ON' : 'OFF'}
+                        </button>
+                      )}
+                      {autoBuyersUnlocked.upgrades && (
+                        <button
+                          onClick={() => setAutoBuyersEnabled(prev => ({ ...prev, upgrades: !prev.upgrades }))}
+                          className={`px-4 py-2 rounded font-bold transition ${autoBuyersEnabled.upgrades ? 'bg-green-500' : 'bg-gray-700'}`}
+                        >
+                          Upgrades: {autoBuyersEnabled.upgrades ? 'ON' : 'OFF'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div className="bg-white/10 backdrop-blur rounded-lg p-6">
                   <div className="flex justify-between items-center mb-4">
@@ -730,12 +839,16 @@
                           <div className="text-sm text-gray-300">{ach.desc}</div>
                           {ach.unlocked && ach.reward && (
                             <div className="text-sm text-yellow-300 mt-2 font-bold">
-                              Reward: +{((ach.reward.value - 1) * 100).toFixed(0)}% {ach.reward.type === 'clickMultiplier' ? 'click power' : 'production'}
+                              Reward: {
+                                ach.reward.type === 'clickMultiplier' ? `+${((ach.reward.value - 1) * 100).toFixed(0)}% click power` :
+                                ach.reward.type === 'productionMultiplier' ? `+${((ach.reward.value - 1) * 100).toFixed(0)}% production` :
+                                ach.reward.type === 'unlockAutobuyers' ? `Unlock ${ach.reward.value} autobuyer!` : ''
+                              }
                             </div>
                           )}
                           {!ach.unlocked && (
                             <div className="text-xs text-gray-400 mt-1">
-                              Progress: {ach.type === 'clicks' ? totalClicks : Math.floor(totalEnergy)}/{ach.requirement}
+                              Progress: {ach.type === 'clicks' ? lifetimeClicks : Math.floor(totalEnergy)}/{ach.requirement}
                             </div>
                           )}
                         </div>
