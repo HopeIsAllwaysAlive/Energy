@@ -66,15 +66,17 @@
         { id: 4, name: 'Rich', desc: 'Verzamel 1000 energy', requirement: 1000, type: 'energy', unlocked: false, reward: { type: 'productionMultiplier', value: 1.1 } },
         { id: 5, name: 'Tycoon', desc: 'Verzamel 10000 energy', requirement: 10000, type: 'energy', unlocked: false, reward: { type: 'productionMultiplier', value: 1.25 } },
         { id: 6, name: 'Mogul', desc: 'Verzamel 100000 energy', requirement: 100000, type: 'energy', unlocked: false, reward: { type: 'productionMultiplier', value: 1.5 } },
-        { id: 7, name: 'Automation Expert', desc: 'Klik 5000 keer', requirement: 5000, type: 'clicks', unlocked: false, reward: { type: 'unlockAutobuyers', value: 'generators' } },
+        { id: 7, name: 'Automation Expert', desc: 'Klik 5000 keer', requirement: 5, type: 'clicks', unlocked: false, reward: { type: 'unlockAutobuyers', value: 'generators' } },
         { id: 8, name: 'Efficiency Master', desc: 'Verzamel 1M energy', requirement: 1000000, type: 'energy', unlocked: false, reward: { type: 'unlockAutobuyers', value: 'upgrades' } }
       ];
 
       const loadGame = () => {
         try {
           const saved = localStorage.getItem('energyClickerSave');
+          console.log('Loading save:', saved ? 'Found' : 'Not found');
           if (saved) {
             const data = JSON.parse(saved);
+            console.log('Parsed save data:', data);
             return data;
           }
         } catch (e) {
@@ -163,45 +165,155 @@
         return upgrade ? upgrade.effect.value : 0;
       }, [prestigeUpgrades]);
 
-      // Offline progress
+      // Offline progress on load
       useEffect(() => {
-        if (savedData && energyPerSecond > 0 && lastSaveTime) {
+        console.log('Checking offline progress...');
+        console.log('SavedData:', savedData);
+        
+        if (savedData && savedData.lastSaveTime) {
           const now = Date.now();
-          const timePassed = (now - lastSaveTime) / 1000;
-          const offlineGains = Math.floor(energyPerSecond * timePassed * (offlineProductionRate || 0));
+          const timePassed = (now - savedData.lastSaveTime) / 1000;
           
-          if (offlineGains > 0 && timePassed > 60) {
-            setEnergy(prev => prev + offlineGains);
-            setTotalEnergy(prev => prev + offlineGains);
-            alert(`Welkom terug! Je hebt ${offlineGains} ⚡ verdiend terwijl je weg was (${Math.floor(timePassed / 60)} minuten)\n${offlineProductionRate > 0 ? `Offline rate: ${(offlineProductionRate * 100).toFixed(0)}%` : 'Upgrade offline production in Prestige tab!'}`);
+          console.log('Time passed (seconds):', timePassed);
+          console.log('Last save time:', new Date(savedData.lastSaveTime));
+          console.log('Current time:', new Date(now));
+          
+          if (timePassed >= 10) { // Changed to 10 seconds for testing
+            let offlineProduction = 0;
+            
+            if (savedData.generators && Array.isArray(savedData.generators)) {
+              savedData.generators.forEach(gen => {
+                if (gen && gen.owned > 0) {
+                  let production = gen.production || 0;
+                  
+                  if (gen.milestones && Array.isArray(gen.milestones)) {
+                    gen.milestones.forEach(milestone => {
+                      if (gen.owned >= milestone.amount) {
+                        production *= milestone.multiplier;
+                      }
+                    });
+                  }
+                  
+                  offlineProduction += gen.owned * production;
+                }
+              });
+            }
+            
+            console.log('Base offline production:', offlineProduction);
+            
+            const achProdBonus = savedData.achievements 
+              ? savedData.achievements
+                  .filter(a => a && a.unlocked && a.reward && a.reward.type === 'productionMultiplier')
+                  .reduce((total, a) => total * a.reward.value, 1)
+              : 1;
+            
+            const prestigeBonusSaved = savedData.prestigeBonus || 1;
+            
+            const prestigeProdBonus = savedData.prestigeUpgrades
+              ? savedData.prestigeUpgrades
+                  .filter(u => u && u.purchased && u.effect && u.effect.type === 'productionMultiplier')
+                  .reduce((total, u) => total * u.effect.value, 1)
+              : 1;
+            
+            offlineProduction = Math.floor(offlineProduction * achProdBonus * prestigeBonusSaved * prestigeProdBonus);
+            
+            console.log('Offline production with bonuses:', offlineProduction);
+            
+            const offlineRate = savedData.prestigeUpgrades
+              ? savedData.prestigeUpgrades.find(u => u && u.purchased && u.effect && u.effect.type === 'offlineRate')
+              : null;
+            
+            const offlineMultiplier = offlineRate ? offlineRate.effect.value : 0;
+            
+            console.log('Offline multiplier:', offlineMultiplier);
+            
+            const offlineGains = Math.floor(offlineProduction * timePassed * offlineMultiplier);
+            
+            console.log('Total offline gains:', offlineGains);
+            
+            if (offlineGains > 0) {
+              setEnergy(prev => prev + offlineGains);
+              setTotalEnergy(prev => prev + offlineGains);
+              
+              const minutes = Math.floor(timePassed / 60);
+              const hours = Math.floor(minutes / 60);
+              const displayTime = hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+              
+              alert(`⏰ Welkom terug!\n\nJe was ${displayTime} weg\nOffline gains: ${offlineGains.toLocaleString()} ⚡\n\n${offlineMultiplier > 0 ? `Offline rate: ${(offlineMultiplier * 100).toFixed(0)}%` : '💡 Koop "Offline Production" in Prestige shop voor offline gains!'}`);
+            } else if (offlineProduction > 0) {
+              alert(`⏰ Welkom terug!\n\nJe was ${Math.floor(timePassed / 60)}m weg\n\n💡 Je hebt productie (${offlineProduction}/sec) maar geen offline gains!\n\nKoop "Offline Production" upgrade in de Prestige tab voor 5 PP om 50% offline te verdienen!`);
+            }
           }
+        } else {
+          console.log('No saved data or lastSaveTime found');
         }
       }, []);
 
-      // Save game
+      // Save game with debounce (only save every 5 seconds)
       useEffect(() => {
-        try {
-          const saveData = {
-            energy,
-            totalEnergy,
-            clickPower,
-            generators,
-            upgrades,
-            totalClicks,
-            lifetimeClicks,
-            achievements,
-            prestigeLevel,
-            prestigeBonus,
-            prestigePoints,
-            prestigeUpgrades,
-            autoBuyersEnabled,
-            autoBuyersUnlocked,
-            lastSaveTime: Date.now()
-          };
-          localStorage.setItem('energyClickerSave', JSON.stringify(saveData));
-        } catch (e) {
-          console.error('Error saving:', e);
-        }
+        const saveToLocalStorage = () => {
+          try {
+            const saveData = {
+              energy,
+              totalEnergy,
+              clickPower,
+              generators,
+              upgrades,
+              totalClicks,
+              lifetimeClicks,
+              achievements,
+              prestigeLevel,
+              prestigeBonus,
+              prestigePoints,
+              prestigeUpgrades,
+              autoBuyersEnabled,
+              autoBuyersUnlocked,
+              lastSaveTime: Date.now()
+            };
+            localStorage.setItem('energyClickerSave', JSON.stringify(saveData));
+            console.log('Game saved at', new Date().toLocaleTimeString());
+          } catch (e) {
+            console.error('Error saving:', e);
+          }
+        };
+
+        // Debounce: save after 5 seconds of last change
+        const timeoutId = setTimeout(saveToLocalStorage, 5000);
+        
+        // Cleanup: cancel if state changes again within 5 seconds
+        return () => clearTimeout(timeoutId);
+      }, [energy, totalEnergy, clickPower, generators, upgrades, totalClicks, lifetimeClicks, achievements, prestigeLevel, prestigeBonus, prestigePoints, prestigeUpgrades, autoBuyersEnabled, autoBuyersUnlocked]);
+
+      // Save on page close/refresh (never lose progress!)
+      useEffect(() => {
+        const handleBeforeUnload = () => {
+          try {
+            const saveData = {
+              energy,
+              totalEnergy,
+              clickPower,
+              generators,
+              upgrades,
+              totalClicks,
+              lifetimeClicks,
+              achievements,
+              prestigeLevel,
+              prestigeBonus,
+              prestigePoints,
+              prestigeUpgrades,
+              autoBuyersEnabled,
+              autoBuyersUnlocked,
+              lastSaveTime: Date.now()
+            };
+            localStorage.setItem('energyClickerSave', JSON.stringify(saveData));
+            console.log('Game saved on page close');
+          } catch (e) {
+            console.error('Error saving on close:', e);
+          }
+        };
+        
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
       }, [energy, totalEnergy, clickPower, generators, upgrades, totalClicks, lifetimeClicks, achievements, prestigeLevel, prestigeBonus, prestigePoints, prestigeUpgrades, autoBuyersEnabled, autoBuyersUnlocked]);
 
       // Idle production
@@ -300,29 +412,66 @@
         
         const interval = setInterval(() => {
           // Auto-buy generators
-          if (autoBuyersEnabled.generators && generators) {
-            generators.forEach(gen => {
-              if (gen.visible) {
-                const cost = calculateCost(gen, 1);
-                if (energy >= cost) {
-                  buyGenerator(gen);
+          if (autoBuyersEnabled.generators && generators && Array.isArray(generators)) {
+            setGenerators(prevGens => {
+              let newGens = [...prevGens];
+              let currentEnergy = energy;
+              
+              newGens.forEach((gen, index) => {
+                if (gen && gen.visible) {
+                  const cost = Math.floor(gen.baseCost * Math.pow(1.15, gen.owned));
+                  if (currentEnergy >= cost) {
+                    currentEnergy -= cost;
+                    newGens[index] = {
+                      ...gen,
+                      owned: gen.owned + 1,
+                      cost: Math.floor(gen.baseCost * Math.pow(1.15, gen.owned + 1))
+                    };
+                  }
                 }
+              });
+              
+              if (currentEnergy !== energy) {
+                setEnergy(currentEnergy);
               }
+              
+              return newGens;
             });
           }
           
           // Auto-buy upgrades
-          if (autoBuyersEnabled.upgrades && upgrades) {
-            upgrades.forEach(upg => {
-              if (upg.visible && !upg.purchased && energy >= upg.cost) {
-                buyUpgrade(upg);
+          if (autoBuyersEnabled.upgrades && upgrades && Array.isArray(upgrades)) {
+            setUpgrades(prevUpgrades => {
+              let newUpgrades = [...prevUpgrades];
+              let currentEnergy = energy;
+              
+              newUpgrades.forEach((upg, index) => {
+                if (upg && upg.visible && !upg.purchased && currentEnergy >= upg.cost) {
+                  currentEnergy -= upg.cost;
+                  newUpgrades[index] = { ...upg, purchased: true };
+                  
+                  // Apply upgrade effect
+                  if (upg.type === 'click') {
+                    setClickPower(prev => prev * upg.multiplier);
+                  } else if (upg.type === 'production') {
+                    setGenerators(prevGens => prevGens.map(g =>
+                      g.id === 1 ? { ...g, production: g.production * upg.multiplier } : g
+                    ));
+                  }
+                }
+              });
+              
+              if (currentEnergy !== energy) {
+                setEnergy(currentEnergy);
               }
+              
+              return newUpgrades;
             });
           }
-        }, 100); // Check every 100ms
+        }, 100);
         
         return () => clearInterval(interval);
-      }, [autoBuyersEnabled, generators, upgrades, energy]);
+      }, [autoBuyersEnabled, energy]);
       useEffect(() => {
         if (!upgrades || !Array.isArray(upgrades)) return;
         
@@ -488,9 +637,34 @@
           
           setGenerators(defaultGenerators);
           setUpgrades(defaultUpgrades);
-          // DON'T reset achievements anymore!
           
-          // Unlock prestige tab after first prestige
+          // Force immediate save after prestige
+          setTimeout(() => {
+            try {
+              const saveData = {
+                energy: 0,
+                totalEnergy: 0,
+                clickPower: 1,
+                generators: defaultGenerators,
+                upgrades: defaultUpgrades,
+                totalClicks: 0,
+                lifetimeClicks,
+                achievements,
+                prestigeLevel: prestigeLevel + 1,
+                prestigeBonus: prestigeBonus * 1.5,
+                prestigePoints: prestigePoints + pointsGained,
+                prestigeUpgrades,
+                autoBuyersEnabled,
+                autoBuyersUnlocked,
+                lastSaveTime: Date.now()
+              };
+              localStorage.setItem('energyClickerSave', JSON.stringify(saveData));
+              console.log('Prestige save completed');
+            } catch (e) {
+              console.error('Prestige save error:', e);
+            }
+          }, 100);
+          
           if (prestigeLevel === 0) {
             setActiveTab('prestige');
           }
@@ -498,16 +672,32 @@
       };
 
       const resetGame = () => {
-        if (confirm('Weet je zeker dat je ALLES wilt resetten? (inclusief prestige)\n\nDit kan NIET ongedaan worden gemaakt!')) {
+        console.log('Reset game called');
+        
+        const confirmed = confirm('⚠️ DEFINITIEVE RESET ⚠️\n\nDit verwijdert ALLES:\n• Al je energy\n• Alle generators\n• Alle upgrades\n• Alle achievements\n• AL je prestige progress\n• Prestige points\n\nDit kan NIET ongedaan gemaakt worden!\n\nWeet je het 100% zeker?');
+        
+        console.log('First confirmation:', confirmed);
+        if (!confirmed) return;
+        
+        const doubleCheck = confirm('Laatste kans!\n\nDruk OK om ALLES permanent te verwijderen.\nDruk Cancel om terug te gaan.');
+        
+        console.log('Double check:', doubleCheck);
+        if (doubleCheck) {
           try {
+            console.log('Removing save from localStorage...');
             localStorage.removeItem('energyClickerSave');
-            // Force complete reset by reloading
+            
+            console.log('Checking if removed:', localStorage.getItem('energyClickerSave'));
+            
+            alert('✅ Save verwijderd! De pagina wordt nu herladen...');
+            
+            console.log('Reloading page...');
             setTimeout(() => {
-              window.location.reload();
-            }, 100);
+              location.reload();
+            }, 500);
           } catch (e) {
-            console.error('Reset failed:', e);
-            alert('Reset mislukt. Probeer de pagina handmatig te verversen.');
+            console.error('Reset error:', e);
+            alert('❌ Reset mislukt!\n\nError: ' + e.message + '\n\nProbeer:\n1. Pagina handmatig verversen (F5)\n2. Browser cache legen\n3. Private/incognito mode gebruiken');
           }
         }
       };
@@ -562,39 +752,51 @@
           )}
 
           <div className="max-w-6xl mx-auto">
+            {/* TITLE */}
             <h1 className="text-4xl font-bold text-center mb-2 flex items-center justify-center gap-2">
               ⚡ Energy Clicker
             </h1>
             {prestigeLevel > 0 && (
-              <p className="text-center text-yellow-300 mb-2">
+              <p className="text-center text-yellow-300 mb-4">
                 ⭐ Prestige Level {prestigeLevel} | +{((prestigeBonus - 1) * 100).toFixed(0)}% bonus | 💎 {prestigePoints} PP
               </p>
             )}
-            <p className="text-center text-blue-200 mb-6">Klik om energie te verzamelen!</p>
 
-            <div className="bg-white/10 backdrop-blur rounded-lg p-6 mb-6">
-              <div className="text-center">
-                <div className="text-5xl font-bold text-yellow-400 mb-2">
-                  {Math.floor(energy).toLocaleString()} ⚡
+            {/* STATS BAR - ALWAYS VISIBLE */}
+            <div className="bg-white/10 backdrop-blur rounded-lg p-4 mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                <div>
+                  <div className="text-3xl md:text-4xl font-bold text-yellow-400">
+                    {Math.floor(energy).toLocaleString()} ⚡
+                  </div>
+                  <div className="text-sm text-blue-200">
+                    {energyPerSecond > 0 && `+${energyPerSecond.toLocaleString()}/sec`}
+                  </div>
                 </div>
-                <div className="text-xl text-blue-200">
-                  {energyPerSecond > 0 && `+${energyPerSecond.toLocaleString()}/sec`}
+                
+                <div>
+                  <div className="text-lg font-bold text-green-300">
+                    Click: {Math.floor(clickPower * achievementClickBonus * prestigeBonus * prestigeClickBonus).toLocaleString()}
+                  </div>
+                  <div className="text-xs text-gray-300">
+                    Total: {totalClicks.toLocaleString()} | Lifetime: {lifetimeClicks.toLocaleString()}
+                    {autoClickRate > 0 && ` | 🤖 ${autoClickRate}/s`}
+                  </div>
                 </div>
-                <div className="text-sm text-gray-300 mt-2">
-                  Click power: {Math.floor(clickPower * achievementClickBonus * prestigeBonus * prestigeClickBonus).toLocaleString()} | 
-                  Total clicks: {totalClicks.toLocaleString()}
-                  {autoClickRate > 0 && ` | 🤖 Auto: ${autoClickRate}/sec`}
-                </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  Total earned: {Math.floor(totalEnergy).toLocaleString()} | 
-                  Lifetime clicks: {lifetimeClicks.toLocaleString()} |
-                  Achievement bonus: {((achievementProductionBonus - 1) * 100).toFixed(0)}% prod, {((achievementClickBonus - 1) * 100).toFixed(0)}% click
-                  {prestigeLevel > 0 && ` | Prestige: +${((prestigeBonus - 1) * 100).toFixed(0)}%`}
-                  {(prestigeClickBonus > 1 || prestigeProductionBonus > 1) && ` | PP Bonus: ${((prestigeClickBonus - 1) * 100).toFixed(0)}% click, ${((prestigeProductionBonus - 1) * 100).toFixed(0)}% prod`}
+                
+                <div>
+                  <div className="text-lg font-bold text-purple-300">
+                    Earned: {Math.floor(totalEnergy).toLocaleString()}
+                  </div>
+                  <div className="text-xs text-gray-300">
+                    Ach: {((achievementProductionBonus - 1) * 100).toFixed(0)}% prod, {((achievementClickBonus - 1) * 100).toFixed(0)}% click
+                    {(prestigeClickBonus > 1 || prestigeProductionBonus > 1) && ` | PP: ${((prestigeProductionBonus - 1) * 100).toFixed(0)}%p`}
+                  </div>
                 </div>
               </div>
             </div>
 
+            {/* CLICK BUTTON */}
             <div className="flex justify-center mb-6">
               <button
                 onClick={handleClick}
@@ -604,7 +806,7 @@
               </button>
             </div>
 
-            {/* Tab Navigation */}
+            {/* TAB NAVIGATION */}
             <div className="flex flex-wrap justify-center gap-2 mb-6">
               <button
                 onClick={() => setActiveTab('main')}
